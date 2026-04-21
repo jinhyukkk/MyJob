@@ -11,7 +11,7 @@
 
 ```bash
 git clone https://github.com/jinhyukkk/MyJob.git
-cd MyJob/app
+cd MyJob
 npm install
 npx prisma db push         # 스키마 → ./prisma/dev.db 생성
 npx tsx scripts/seed.ts    # 기본 Profile + CJ 소스 (config 포함) 주입
@@ -24,7 +24,7 @@ npm run dev                # http://localhost:3000
 - 네트워크에서 `recruit.cj.net` 접근 가능
 
 **절대 지켜야 할 것**
-- 모든 명령은 **`app/`에서 실행**. `DATABASE_URL="file:./dev.db"`는 `prisma/schema.prisma` 기준 상대경로라 상위 디렉터리에서 실행하면 DB 파일 위치가 어긋남.
+- 모든 명령은 **리포 루트(`MyJob/`)에서 실행**. `DATABASE_URL="file:./dev.db"`는 `prisma/schema.prisma` 기준 상대경로라 다른 디렉터리에서 실행하면 DB 파일 위치가 어긋남.
 
 ---
 
@@ -291,7 +291,7 @@ SWR 자동 폴링: stats 30s, 개별 리스트 60s. 크롤 후 `mutate()` 수동
 | 증상 | 원인 / 해결 |
 |------|------------|
 | `prisma/dev.db` 가 없음 | `npx prisma db push` 실행. seed 전에 반드시. |
-| `Table Job does not exist` | `app/` 가 아닌 위치에서 명령 실행함. `cd app` 후 재시도. |
+| `Table Job does not exist` | 리포 루트가 아닌 곳에서 명령 실행함. `cd MyJob` 후 재시도. |
 | 크롤 `HTTP 4xx/5xx` | CJ 사이트 구조 변경 가능성. `curl -X POST .../searchNewGonggoList.fo` 로 직접 호출해 응답 확인. |
 | description 이 비어 있음 | 상세 페이지 DOM 변경 가능성. [cj_recruit.ts `fetchDetailText`](src/lib/crawlers/cj_recruit.ts) 의 li-text 로직 확인. |
 | "Java" 키워드인데 예상 공고가 빠짐 | word-boundary 매치라 `JavaScript` 는 제외됨. 원하면 `configSchema` 매칭 로직을 substring 으로 완화. |
@@ -303,7 +303,7 @@ SWR 자동 폴링: stats 30s, 개별 리스트 60s. 크롤 후 `mutate()` 수동
 
 ## 13. 향후 확장 지점
 
-- **스케줄링**: `scripts/crawl.ts` 를 cron 으로 연결 (`0 */2 * * * cd app && npx tsx scripts/crawl.ts`) 또는 Vercel Cron / node-cron 기반 워커
+- **스케줄링**: `scripts/crawl.ts` 를 cron 으로 연결 (`0 */2 * * * cd /path/to/MyJob && npx tsx scripts/crawl.ts`) 또는 Vercel Cron / node-cron 기반 워커
 - **신규 어댑터**: 원티드·잡코리아·사람인·링크드인·Greenhouse·Lever
 - **매칭 고도화**: `scoreJob()` 를 LLM (Claude API) 호출로 교체. 프롬프트 캐싱 적극 사용
 - **이력서 업로드**: PDF → Claude API 로 스택/경력 추출해 Profile 자동 채우기
