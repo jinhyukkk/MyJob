@@ -1,223 +1,311 @@
 # MyJob
 
-> 내가 원하는 조건의 채용공고만 자동으로 모아주는 개인용 수집 서비스.
-
-여러 채용 사이트에서 공고를 긁어와 하나의 리스트로 보여주고, 저장·지원·면접·오퍼 단계를 트래킹합니다.
-프로필 기반 매칭 점수로 우선순위를 매겨주고, 본문 키워드 필터로 실제 관심 있는 공고만 남깁니다.
+개인용 채용공고 수집·트래킹 서비스. **Next.js 14 App Router + Prisma(SQLite) + 어댑터형 크롤러.**
 
 현재 지원 사이트: **CJ Careers** ([recruit.cj.net](https://recruit.cj.net/))
-기본 설정: **경력 / IT / 서울 / 본문에 "Java" 포함** → 16건 수집 중 (2026-04-22 기준)
+기본 정책: `경력 / IT / 서울 / 본문에 "Java" 포함` (word-boundary 매치)
 
 ---
 
-## 실행
+## 1. 빠른 시작 (fresh clone)
 
 ```bash
-cd app
+git clone https://github.com/jinhyukkk/MyJob.git
+cd MyJob/app
 npm install
-npx prisma db push         # 스키마 → DB 동기화 (prisma/dev.db 생성)
-npx tsx scripts/seed.ts    # Profile + CJ 소스 기본 설정 seed
-npx tsx scripts/crawl.ts   # 첫 크롤 (목록 필터링 + 상세 본문 fetch)
+npx prisma db push         # 스키마 → ./prisma/dev.db 생성
+npx tsx scripts/seed.ts    # 기본 Profile + CJ 소스 (config 포함) 주입
+npx tsx scripts/crawl.ts   # 실제 크롤 실행 (16건 내외)
 npm run dev                # http://localhost:3000
 ```
 
-프로덕션 빌드:
+**요구사항**
+- Node **20+** (전역 `fetch` 필요, Node 24 테스트됨)
+- 네트워크에서 `recruit.cj.net` 접근 가능
 
-```bash
-npm run build && npm start
+**절대 지켜야 할 것**
+- 모든 명령은 **`app/`에서 실행**. `DATABASE_URL="file:./dev.db"`는 `prisma/schema.prisma` 기준 상대경로라 상위 디렉터리에서 실행하면 DB 파일 위치가 어긋남.
+
+---
+
+## 2. 리포지토리 레이아웃
+
+| 경로 | 역할 | AI가 처음 봐야 할 순서 |
+|------|------|----------------------|
+| `prisma/schema.prisma` | DB 모델 3개 (Source/Job/Profile) | ① |
+| `src/lib/types.ts` | `CrawlerAdapter`, `AdapterConfigSchema`, `NormalizedJob` 인터페이스 | ② |
+| `src/lib/crawlers/cj_recruit.ts` | CJ 어댑터 구현 — 레퍼런스 구현체 | ③ |
+| `src/lib/crawl.ts` | 공통 파이프라인 (upsert + closed 감지 + 점수 재계산) | ④ |
+| `src/lib/match.ts` | 매칭 점수 공식 | ⑤ |
+| `src/app/api/*` | REST 엔드포인트 | ⑥ |
+| `src/app/**/page.tsx` | 5개 라우트 UI | ⑦ |
+| `src/ui/*` | 재사용 컴포넌트 (Shell/Icon/JobRow/DetailDrawer) | ⑧ |
+| `scripts/seed.ts` | 기본 Profile + CJ 소스 seed (idempotent) | - |
+| `scripts/crawl.ts` | CLI 크롤 실행 (cron 연결용) | - |
+| `sample/` | 원본 React 프로토타입 (참고용, 빌드에 포함 안 됨) | - |
+
+---
+
+## 3. 데이터 모델 ([prisma/schema.prisma](prisma/schema.prisma))
+
+```
+Source (크롤 소스)
+  id         cuid
+  name       string       # 표시명
+  adapter    string       # 어댑터 키 (e.g. "cj_recruit")
+  url        string       # 참조용 URL
+  active     bool
+  config     string       # JSON 문자열: 어댑터 필터·키워드
+  lastSyncAt DateTime?
+  lastError  string?
+  └─ jobs: Job[]
+
+Job (수집된 공고)
+  id             cuid
+  sourceId       → Source
+  externalId     string   # 사이트의 공고 고유 ID
+  title, company, team, location, type, level, category
+  url            string   # 원문 링크
+  description    string?  # 상세 본문 (키워드 필터용)
+  postedAt       DateTime?
+  deadlineAt     DateTime?
+  deadlineLabel  string?  # "2026.05.03"
+  ddayLabel      string?  # "D-12" | "상시" | "마감"
+  raw            string   # adapter가 받은 원본 JSON
+  firstSeenAt, lastSeenAt DateTime
+  closed         bool     # 이번 크롤에 안 나타나면 true
+  saved, applied bool
+  stage          string?  # Saved | Applied | Interview | Offer | Rejected
+  note           string?
+  match          int      # 0-100 매칭 점수
+  matchReasons   string?  # JSON array
+  UNIQUE(sourceId, externalId)
+
+Profile (단일 사용자, id=1 고정)
+  name, role       string
+  stack            JSON string[]   # 가중치 5
+  interests        JSON string[]   # 가중치 3
+  locations        JSON string[]   # 가중치 2
+  salaryMin/Max    int?
+  passive          bool
 ```
 
 ---
 
-## 화면 구성
+## 4. 크롤 파이프라인 ([src/lib/crawl.ts](src/lib/crawl.ts))
 
-샘플 `MyJob Minimal.html` 의 레이아웃을 Next.js로 이식. 5개 라우트 + 오른쪽 Drawer 상세.
+`crawlSource(sourceId)` 가 호출되면:
 
-| 경로 | 내용 |
-|------|------|
-| `/` (**For you**) | 수집된 공고 전체 리스트. 제목·회사·직무·위치 검색, `match / recent / deadline` 정렬, 진행중만 토글, 회사별 칩 필터. 상단 **Refresh** 로 즉시 크롤. |
-| `/saved` | 북마크한 공고 |
-| `/applications` | Saved / Applied / Interview / Offer 칸반 보드 |
-| `/sources` | 크롤 소스 관리 — 스위치 on/off, adapter별 **필터/키워드 편집 패널**, 수동 Crawl, 삭제 |
-| `/profile` | 이름/역할/스택/관심사/지역 편집. "저장 + 전체 재계산" 으로 이미 수집된 공고의 매치 점수를 다시 계산 |
+```
+1. Source 로드 + Source.config JSON 파싱
+2. adapter.fetch(config) → NormalizedJob[]
+3. Profile 로드 → stack/interests/locations 추출
+4. 각 NormalizedJob 에 대해:
+     - (sourceId, externalId) 존재하면 UPDATE (description/fields/match)
+     - 없으면 INSERT
+     - match 점수는 scoreJob(profile, job) 로 매번 재계산
+5. adapter 응답에 **없는** 기존 Job 은 closed = true 로 마킹
+6. Source.lastSyncAt 갱신, 에러는 Source.lastError 에 기록
+```
 
-상세 Drawer: 매치 점수/근거, 스테이지 버튼 (Saved → Applied → Interview → Offer → Rejected), 메모, 원문 링크, 수집 시각.
+**트리거 방법**
+- UI 우상단 **Refresh** 버튼 → `POST /api/crawl`
+- `/sources` 개별 소스 **Crawl** 버튼 → `POST /api/crawl?sourceId=<id>`
+- CLI: `npx tsx scripts/crawl.ts` (모든 active 소스)
 
 ---
 
-## 아키텍처
-
-```
-┌─ Next.js (App Router) ─────────────────────────────────────┐
-│                                                            │
-│   UI (src/app/*, src/ui/*)                                 │
-│      │ SWR (30s polling)                                   │
-│      ▼                                                     │
-│   /api/jobs, /api/sources, /api/profile,                   │
-│   /api/crawl, /api/stats                                   │
-│      │                                                     │
-│      ▼                                                     │
-│   src/lib/crawl.ts  ──▶  src/lib/crawlers/<adapter>.ts     │
-│      │                         │                           │
-│      │                         ▼  fetch(config) → Normalized│
-│      │                    외부 채용 사이트 API/HTML         │
-│      ▼                                                     │
-│   Prisma Client ──▶ SQLite (prisma/dev.db)                 │
-└────────────────────────────────────────────────────────────┘
-```
-
-### 데이터 모델 ([prisma/schema.prisma](prisma/schema.prisma))
-
-- **`Source`** — 크롤 대상. `adapter` 키 + `config` (JSON 문자열: 필터·키워드)
-- **`Job`** — 수집된 공고. `(sourceId, externalId)` 유니크. 매 크롤마다 upsert 되고 이번 크롤에 안 나온 공고는 `closed=true` 로 마킹
-- **`Profile`** — 단일 사용자 프로필 (id=1 고정). 매칭 점수 계산용 입력
-
-### 크롤 파이프라인 ([src/lib/crawl.ts](src/lib/crawl.ts))
-
-1. `Source.config` JSON 파싱 → adapter에 전달
-2. `adapter.fetch(config)` 가 리스트 크롤 + 필터 + (선택) 상세 크롤 후 `NormalizedJob[]` 반환
-3. 각 공고에 대해 **upsert** (existing → update, else → insert)
-4. 프로필과의 **매치 점수 재계산** 및 저장 (스택×5, 관심사×3, 지역×2)
-5. 이번 응답에 **없는** 기존 공고는 `closed=true` 처리 (필터에서 빠졌거나 사이트에서 내려간 것)
-6. `Source.lastSyncAt` / `lastError` 업데이트
-
-### 어댑터 인터페이스 ([src/lib/types.ts](src/lib/types.ts))
+## 5. 어댑터 계약 ([src/lib/types.ts](src/lib/types.ts))
 
 ```ts
 interface CrawlerAdapter {
-  key: string;                          // "cj_recruit"
-  name: string;                         // "CJ Careers"
-  configSchema?: AdapterConfigSchema;   // Sources UI 자동 생성 (multi / keywords)
+  key: string;                          // 예: "cj_recruit"
+  name: string;                         // 예: "CJ Careers"
+  configSchema?: AdapterConfigSchema;   // Sources UI 자동 생성
   fetch(config: AdapterConfig): Promise<NormalizedJob[]>;
 }
+
+type AdapterConfigField =
+  | { key, label, type: "multi",    options: { value, label }[] }
+  | { key, label, type: "keywords", placeholder?: string };
 ```
 
-`configSchema` 를 정의하면 **Sources 페이지에 필터 편집 UI가 자동 렌더**됩니다. 어댑터 코드만 추가하면 UI 없이 설정 가능.
+어댑터는 **`fetch()` 안에서 필터링·throttling·상세 fetch를 모두 책임**. 상위 파이프라인은 결과만 받음.
 
 ---
 
-## CJ Careers 어댑터 상세 ([src/lib/crawlers/cj_recruit.ts](src/lib/crawlers/cj_recruit.ts))
+## 6. CJ Careers 어댑터 ([src/lib/crawlers/cj_recruit.ts](src/lib/crawlers/cj_recruit.ts))
 
-공식 내부 API를 리버스 엔지니어링해 사용 (HTML 스크래핑 최소화).
+### 엔드포인트
 
-| 단계 | 엔드포인트 | 용도 |
-|------|------------|------|
-| 목록 | `POST /recruit/ko/recruit/recruit/searchNewGonggoList.fo` | JSON 응답. `arrGubun / arrRecJob / arrRecArea` 로 서버측 필터링 |
-| 상세 | `GET /recruit/ko/recruit/recruit/{detail,bestDetail}.fo?zz_jo_num=<id>` | HTML. 리스트의 `gubun` 필드에 따라 URL 선택 (`gubun=2` → `bestDetail`) |
+| 종류 | 메서드 | URL | 포맷 |
+|------|--------|-----|------|
+| 목록 | POST | `/recruit/ko/recruit/recruit/searchNewGonggoList.fo` | `application/x-www-form-urlencoded` → JSON |
+| 상세 | GET | `/recruit/ko/recruit/recruit/{detail\|bestDetail}.fo?zz_jo_num={id}` | HTML |
 
-### 기본 설정
+**detail vs bestDetail 분기**: 응답의 `gubun` 필드가 `"2"`면 `bestDetail.fo`, 그 외는 `detail.fo`. 두 URL은 같은 body를 반환하지만 실제 사이트 라우팅과 맞추면 원문 링크 UX가 일관됨.
 
-```json
+### 목록 요청 파라미터
+
+```
+pageVal=1                  # 페이지 번호 (1-base)
+pageIndex=100              # 페이지 크기
+schArea=Y or N             # 필터 사용 여부 (아무 필터라도 있으면 Y)
+arrGubun=B                 # 채용구분, -@- 로 multi-value 조인
+arrRecBu=                  # 주관사
+arrRecJob=IR               # 직무
+arrRecArea=KR11            # 지역
+sch_title=                 # 제목 검색
+orderDesc=
+```
+
+### 내장 코드 테이블 (Sources UI 드롭다운 소스)
+
+| 필드 | 키 | 값 |
+|------|----|----|
+| 채용구분 (`arrGubun`) | `A`/`B`/`C`/`Z` | 신입/경력/인턴/기타 |
+| 직무 (`arrRecJob`) | `AA`/`AB`/`AC`/`AD`/`BE`/`CF`/`DG`/`EI`/`EJ`/`EK`/`FM`/`GN`/`HP`/**`IR`**/`JS`/`KT` | 인사/사업관리/전략/경영지원/영업/마케팅/서비스/콘텐츠제작/콘텐츠사업/콘텐츠기술/제조/건설개발/연구개발/**IT**/디자인/물류 |
+| 지역 (`arrRecArea`) | `KR00`/**`KR11`**/`KR26`/`KR27`/`KR28`/`KR29`/`KR30`/`KR31` | 전국/**서울**/부산/대구/인천/광주/대전/울산 |
+
+### 알려진 quirk
+
+CJ 상세 페이지는 `<p class="contents"><p>...본문...</p></p>` 처럼 `<p>`가 중첩됨. HTML5 파서가 outer `<p>`를 자동으로 닫아 `p.contents.text()` 가 **빈 문자열**을 반환함. 대응:
+
+```ts
+// li 를 clone → h3/svg/script/style 제거 → 전체 text()
+```
+
+이 방식으로 중첩 DOM과 무관하게 본문 확보.
+
+---
+
+## 7. Source.config 스키마 (CJ 어댑터)
+
+```jsonc
 {
-  "gubun":   ["B"],                    // 경력
-  "recJob":  ["IR"],                   // IT
-  "recArea": ["KR11"],                 // 서울
-  "descriptionIncludes": ["Java"]      // 본문에 이 키워드 모두 포함해야 통과
+  "gubun":   ["B"],           // 채용구분 코드 배열 (빈 배열 = 전체)
+  "recJob":  ["IR"],          // 직무 코드 배열
+  "recArea": ["KR11"],        // 지역 코드 배열
+  "descriptionIncludes": ["Java"]   // 본문 키워드 (AND, word-boundary 매치)
 }
 ```
 
-- `gubun / recJob / recArea` 는 리스트 API에 `-@-` 로 이어 붙여 전달 → **서버단 필터링**
-- `descriptionIncludes` 는 리스트 통과한 공고에 대해서만 상세 페이지 fetch 후 **word-boundary** 매칭 (e.g. `Java` 키워드가 `JavaScript` 에 false-match 되지 않도록)
-- 코드 테이블(채용구분/직무/지역)은 어댑터 안에 내장되어 Sources UI에서 드롭다운으로 보여줌
+**동작 순서**
+1. `gubun/recJob/recArea` → CJ 목록 API에 그대로 전달 (서버측 필터링)
+2. 목록 응답받은 각 공고 → 상세 페이지 fetch → 본문 추출
+3. `descriptionIncludes`의 **모든 키워드**가 본문에 word-boundary 매치로 포함되어야 통과
+4. ASCII 키워드(`Java`)는 `\bJava\b` 정규식 → `JavaScript` 에 false-match 안 됨
+5. 한글 키워드는 plain substring 매치 (Hangul에서 `\b` 가 신뢰 불가)
 
-### 파싱 주의점
-
-CJ 상세 페이지는 `<p class="contents"><p>...본문...</p></p>` 처럼 `<p>` 가 중첩되어 있어 HTML5 파서가 outer `<p>` 를 자동으로 닫아버립니다. 결과적으로 `p.contents.text()` 는 **빈 문자열**을 반환. 그래서 어댑터는 `<li>` 를 클론해 `h3/svg/script/style` 만 제거한 뒤 전체 텍스트를 뽑습니다.
+**편집 방법**
+- GUI: `/sources` → 해당 소스 **Edit** → 체크박스/칩 입력 → **설정 저장** → **Crawl**
+- API: `PATCH /api/sources/:id` body `{ "config": { ... } }`
+- JSON 직접 편집: `sqlite3 prisma/dev.db "UPDATE Source SET config='...' WHERE id=..."` 후 재크롤
 
 ---
 
-## 매칭 점수
-
-단순하고 투명한 키워드 중첩 방식 ([src/lib/match.ts](src/lib/match.ts)):
+## 8. 매칭 점수 ([src/lib/match.ts](src/lib/match.ts))
 
 ```
-score = min(100, hits / max_possible * 100)
+corpus = title + company + category + location + description   (lowercase)
 
-stack     항목 × 5점
-interests 항목 × 3점
-locations 항목 × 2점
+max  = len(stack)*5 + len(interests)*3 + len(locations)*2
+hits = Σ (스택 매치) * 5  +  Σ (관심사 매치) * 3  +  Σ (지역 매치) * 2
+
+score = min(100, round(hits / max * 100))
+reasons = 매치된 키워드별 이유 문자열 배열
 ```
 
-Profile 페이지에서 키워드를 추가하면 그 다음 크롤부터 반영됩니다. 이미 수집된 공고를 즉시 재점수화하려면 **"저장 + 전체 재계산"** 버튼 (내부적으로 프로필 저장 후 전체 크롤 재실행).
-
-LLM 기반 매칭으로 확장하려면 `scoreJob()` 을 교체하거나 크롤 시 호출되는 지점 ([crawl.ts](src/lib/crawl.ts)) 에서 대안 구현을 호출하세요.
+점수는 크롤마다 재계산됨. Profile 페이지의 **"저장 + 전체 재계산"** 버튼은 프로필 저장 후 전체 크롤을 다시 실행 → 기존 공고까지 즉시 재점수화.
 
 ---
 
-## 새 사이트 추가
+## 9. API 엔드포인트
 
-1. **어댑터 작성** — `src/lib/crawlers/<key>.ts` 에 `CrawlerAdapter` 구현
-2. **등록** — `src/lib/crawlers/index.ts` 의 `adapters` 맵에 추가
-3. **설정 스키마 (선택)** — `configSchema` 를 넘기면 Sources UI가 자동으로 필터 편집 패널 생성
-   - `type: 'multi'` → 체크박스 토글
-   - `type: 'keywords'` → 자유 입력 칩
-4. **소스 등록** — `/sources` 에서 adapter 선택 → Add source → Edit 패널로 필터 설정 → Crawl
-
-규약:
-- `externalId` 는 해당 사이트에서 공고를 고유하게 식별하는 값 (URL에 들어가는 ID 등)
-- 빈 본문을 반환해야 하는 경우엔 `description: null` (키워드 필터 쓸 때는 skip)
-- throttling 필요시 어댑터 내부에서 `await sleep(ms)` — 상위 파이프라인은 관여하지 않음
+| Method | Path | Body / Query | 반환 |
+|--------|------|--------------|------|
+| GET | `/api/stats` | — | 공고·소스 카운터 + lastSyncAt |
+| GET | `/api/jobs` | `?q=&scope=all\|saved\|applied\|active&company=&sort=match\|recent\|deadline` | `{ jobs[], count }` |
+| GET | `/api/jobs/:id` | — | `{ job }` (source relation 포함) |
+| PATCH | `/api/jobs/:id` | `{ saved?, applied?, stage?, note? }` | 업데이트된 `{ job }` |
+| GET | `/api/sources` | — | `{ sources[], adapters[] }` (adapters 에 configSchema 포함) |
+| POST | `/api/sources` | `{ name, adapter, url, active? }` | 생성된 `{ source }` |
+| PATCH | `/api/sources/:id` | `{ active?, name?, url?, config? }` (`config` 는 object 또는 JSON string) | `{ source }` |
+| DELETE | `/api/sources/:id` | — | `{ ok: true }` (cascade로 Job도 삭제) |
+| POST | `/api/crawl` | `?sourceId=<id>` (옵션) | `{ results: CrawlResult[] }` |
+| GET | `/api/profile` | — | `{ profile }` (없으면 auto-create) |
+| PATCH | `/api/profile` | `{ name?, role?, stack?, interests?, locations?, salaryMin?, salaryMax?, passive? }` | `{ profile }` |
 
 ---
 
-## 프로젝트 레이아웃
+## 10. UI 라우트
 
+| 경로 | 컴포넌트 | 기능 |
+|------|----------|------|
+| `/` | [page.tsx](src/app/page.tsx) | **For you** — 전체 리스트, 검색, 회사 칩, 진행중 토글, match/recent/deadline 정렬 |
+| `/saved` | [saved/page.tsx](src/app/saved/page.tsx) | 북마크 목록 |
+| `/applications` | [applications/page.tsx](src/app/applications/page.tsx) | Saved/Applied/Interview/Offer 칸반 |
+| `/sources` | [sources/page.tsx](src/app/sources/page.tsx) | 소스 CRUD + **configSchema 기반 자동 편집 UI** + Crawl 트리거 |
+| `/profile` | [profile/page.tsx](src/app/profile/page.tsx) | 프로필 편집 + 전체 재점수화 |
+
+공통 Shell: [src/ui/Shell.tsx](src/ui/Shell.tsx) — 상단바 + 좌측 네비 + Refresh + 크롤 상태 배지
+상세 Drawer: [src/ui/JobDetailDrawer.tsx](src/ui/JobDetailDrawer.tsx) — 우측 슬라이드. stage 변경, 메모, 매치 근거.
+
+SWR 자동 폴링: stats 30s, 개별 리스트 60s. 크롤 후 `mutate()` 수동 갱신.
+
+---
+
+## 11. 새 어댑터 추가 체크리스트
+
+신규 사이트 지원 시 **어댑터 파일 1개 + 레지스트리 1줄**만 건드리면 됨. 기타 시스템은 config 스키마를 읽어 자동 대응.
+
+- [ ] `src/lib/crawlers/<key>.ts` 생성, `CrawlerAdapter` 구현
+  - `key`, `name` 설정
+  - `fetch(config)` 에서 목록 → (필요시) 상세 → `NormalizedJob[]` 반환
+  - 필터 UI 원하면 `configSchema` 정의
+  - 상세 페이지 fetch 시 `await sleep(150~300ms)` throttling
+  - 에러는 throw (상위에서 `Source.lastError` 에 기록됨)
+- [ ] `src/lib/crawlers/index.ts` 의 `adapters` 맵에 추가
+- [ ] `/sources` 페이지에서 Add source → 어댑터 선택 → config 편집 → Crawl
+- [ ] 한번 크롤해서 `raw` 필드에 실제 응답 저장되는지 확인 → 필드 매핑 교정
+
+**NormalizedJob 필드 규약**
+```ts
+{
+  externalId: string,   // 해당 사이트의 공고 고유 ID (URL 해시 금지)
+  title, company: string,
+  url: string,          // 원문 링크 (detail 페이지)
+  description?: string, // 키워드 필터 쓰려면 필수
+  postedAt?, deadlineAt?: Date,
+  deadlineLabel?: string,  // 사이트 표기 그대로
+  ddayLabel?: string,      // "D-3" | "상시" | "마감"
+  raw: unknown,         // 원본 보존
+  ...
+}
 ```
-app/
-├ prisma/
-│  ├ schema.prisma           # Source / Job / Profile
-│  └ dev.db                  # SQLite (gitignored)
-├ scripts/
-│  ├ seed.ts                 # 기본 Profile + CJ 소스 생성
-│  └ crawl.ts                # 모든 active 소스 크롤 실행 (cron/CLI용)
-├ src/
-│  ├ app/
-│  │  ├ layout.tsx, globals.css
-│  │  ├ page.tsx             # /  (For you)
-│  │  ├ saved/page.tsx
-│  │  ├ applications/page.tsx
-│  │  ├ sources/page.tsx
-│  │  ├ profile/page.tsx
-│  │  └ api/
-│  │     ├ jobs/{route.ts, [id]/route.ts}
-│  │     ├ sources/{route.ts, [id]/route.ts}
-│  │     ├ profile/route.ts
-│  │     ├ crawl/route.ts    # POST → 전체 또는 ?sourceId= 단일 크롤
-│  │     └ stats/route.ts
-│  ├ lib/
-│  │  ├ db.ts                # Prisma singleton
-│  │  ├ types.ts             # Crawler / Config 타입
-│  │  ├ match.ts             # 매칭 점수
-│  │  ├ crawl.ts             # upsert + closed 판정
-│  │  └ crawlers/
-│  │     ├ index.ts          # adapter registry
-│  │     └ cj_recruit.ts     # CJ Careers
-│  └ ui/
-│     ├ tokens.ts            # 샘플 디자인 토큰 이식
-│     ├ Icon.tsx, Placeholder.tsx
-│     ├ Shell.tsx            # TopBar + Sidebar + Refresh 버튼
-│     ├ JobRow.tsx           # 테이블 행
-│     └ JobDetailDrawer.tsx  # 우측 상세 패널
-├ next.config.mjs, tsconfig.json
-└ package.json
-```
 
 ---
 
-## 앞으로
+## 12. 운영 / 트러블슈팅
 
-- 자동 스케줄링 (vercel.json cron 또는 `node-cron` 기반 워커)
-- 어댑터: 원티드 / 잡코리아 / 사람인 / Greenhouse·Lever 범용
-- 본문 매칭 고도화 (Claude API 호출, embedding 기반 semantic match)
-- 이력서 업로드 → 자동 스택 추출
-- 공고 변경 감지 (제목·마감일이 바뀐 경우 diff 알림)
-- Slack/이메일 push (새 D-3 공고, 매치 80+ 공고)
+| 증상 | 원인 / 해결 |
+|------|------------|
+| `prisma/dev.db` 가 없음 | `npx prisma db push` 실행. seed 전에 반드시. |
+| `Table Job does not exist` | `app/` 가 아닌 위치에서 명령 실행함. `cd app` 후 재시도. |
+| 크롤 `HTTP 4xx/5xx` | CJ 사이트 구조 변경 가능성. `curl -X POST .../searchNewGonggoList.fo` 로 직접 호출해 응답 확인. |
+| description 이 비어 있음 | 상세 페이지 DOM 변경 가능성. [cj_recruit.ts `fetchDetailText`](src/lib/crawlers/cj_recruit.ts) 의 li-text 로직 확인. |
+| "Java" 키워드인데 예상 공고가 빠짐 | word-boundary 매치라 `JavaScript` 는 제외됨. 원하면 `configSchema` 매칭 로직을 substring 으로 완화. |
+| 크롤 후 `closed` 공고가 급증 | 필터를 새로 좁히면 기존에 매치되던 공고가 전부 사라지므로 정상. `/` 의 "진행중만" 필터로 숨겨짐. |
+| Prisma 타입이 최신 아님 | 스키마 수정 후 `npx prisma db push` 자동 `generate`. 수동은 `npx prisma generate`. |
+| 서버 포트 충돌 | `npx next dev -p 3001` |
 
 ---
 
-## 개발 메모
+## 13. 향후 확장 지점
 
-- **DB 경로**: `DATABASE_URL="file:./dev.db"` 는 `schema.prisma` 기준 상대경로로 해석됨 → 실제 파일 `app/prisma/dev.db`
-- **서버 포트**: 3000 점유 시 `npx next dev -p 3001`
-- **Prisma 타입 재생성**: 스키마 변경시 `npx prisma db push` 가 `generate` 까지 자동 실행. 수동으로는 `npx prisma generate`
-- **Node 버전**: ESM 모듈 구동을 위해 Node 20+ 권장 (현재 24에서 테스트됨)
+- **스케줄링**: `scripts/crawl.ts` 를 cron 으로 연결 (`0 */2 * * * cd app && npx tsx scripts/crawl.ts`) 또는 Vercel Cron / node-cron 기반 워커
+- **신규 어댑터**: 원티드·잡코리아·사람인·링크드인·Greenhouse·Lever
+- **매칭 고도화**: `scoreJob()` 를 LLM (Claude API) 호출로 교체. 프롬프트 캐싱 적극 사용
+- **이력서 업로드**: PDF → Claude API 로 스택/경력 추출해 Profile 자동 채우기
+- **변경 감지**: 제목·마감일 diff → 알림
+- **푸시 알림**: 매치 80+ 또는 D-3 공고 Slack/이메일
