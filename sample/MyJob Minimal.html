@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>MyJob — Minimal Editorial</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.css" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: oklch(0.985 0.002 265); overflow: hidden; }
+  body { font-family: 'Pretendard Variable', 'IBM Plex Sans', -apple-system, system-ui, sans-serif; color: oklch(0.18 0.01 265); }
+  * { box-sizing: border-box; }
+  #root { height: 100vh; width: 100vw; }
+
+  .tweaks-panel {
+    position: fixed; bottom: 16px; right: 16px; width: 240px; z-index: 1000;
+    background: oklch(1 0 0); color: oklch(0.18 0.01 265);
+    border: 1px solid oklch(0.92 0.004 265);
+    border-radius: 8px; padding: 12px;
+    font-family: 'Pretendard Variable', 'IBM Plex Sans', sans-serif; font-size: 12px;
+    box-shadow: 0 8px 32px rgba(20,25,45,0.08);
+    display: none;
+  }
+  .tweaks-panel.active { display: block; }
+  .tweaks-panel h4 { margin: 0 0 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+    color: oklch(0.58 0.008 265); font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+  .tweaks-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; gap: 10px; }
+  .tweaks-row label { color: oklch(0.42 0.01 265); font-size: 12px; }
+  .tweaks-row select {
+    background: oklch(0.97 0.003 265); color: oklch(0.18 0.01 265);
+    border: 1px solid oklch(0.92 0.004 265); padding: 3px 8px; border-radius: 4px;
+    font-size: 11px; font-family: inherit; min-width: 110px;
+  }
+  .swatches { display: flex; gap: 5px; }
+  .swatch { width: 16px; height: 16px; border-radius: 4px; cursor: pointer; border: 1px solid rgba(0,0,0,0.05); }
+  .swatch.on { box-shadow: 0 0 0 1.5px oklch(0.18 0.01 265); }
+</style>
+</head>
+<body data-screen-label="MyJob — Minimal">
+<div id="root"></div>
+
+<div id="tweaks" class="tweaks-panel">
+  <h4>Tweaks</h4>
+  <div class="tweaks-row">
+    <label>Start screen</label>
+    <select id="tw-screen">
+      <option value="feed">For you</option>
+      <option value="bookmarks">Saved</option>
+      <option value="tracker">Applications</option>
+      <option value="sources">Sources</option>
+      <option value="profile">Profile</option>
+    </select>
+  </div>
+  <div class="tweaks-row">
+    <label>Density</label>
+    <select id="tw-density">
+      <option value="compact">Compact</option>
+      <option value="comfortable">Comfortable</option>
+    </select>
+  </div>
+  <div class="tweaks-row">
+    <label>Accent</label>
+    <div class="swatches" id="tw-accent">
+      <div class="swatch" data-v="oklch(0.52 0.13 155)" style="background:oklch(0.52 0.13 155)"></div>
+      <div class="swatch" data-v="oklch(0.55 0.14 245)" style="background:oklch(0.55 0.14 245)"></div>
+      <div class="swatch" data-v="oklch(0.56 0.14 30)"  style="background:oklch(0.56 0.14 30)"></div>
+      <div class="swatch" data-v="oklch(0.52 0.16 295)" style="background:oklch(0.52 0.16 295)"></div>
+      <div class="swatch" data-v="oklch(0.22 0.01 265)" style="background:oklch(0.22 0.01 265)"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="common.jsx"></script>
+<script type="text/babel" src="variant-minimal.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "startScreen": "feed",
+  "density":     "compact",
+  "accent":      "oklch(0.52 0.13 155)"
+}/*EDITMODE-END*/;
+
+function applyAccent(v) {
+  if (!window.MJ_TOKENS) return;
+  MJ_TOKENS.accent = v;
+  const m = String(v).match(/oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)/);
+  if (m) {
+    const l = parseFloat(m[1]);
+    MJ_TOKENS.accentSoft = l < 0.3
+      ? `oklch(0.92 0.01 ${m[3]})`
+      : `oklch(0.94 0.04 ${m[3]})`;
+    MJ_TOKENS.accentText = l < 0.3
+      ? v
+      : `oklch(0.36 0.12 ${m[3]})`;
+  }
+}
+
+function Shell() {
+  const [tw, setTw] = React.useState(TWEAK_DEFAULTS);
+  applyAccent(tw.accent);
+
+  React.useEffect(() => { window.__setTw = setTw; }, []);
+
+  // remount when accent changes so cached style objects in tree refresh
+  return (
+    <div key={tw.accent + tw.density} style={{ width: '100%', height: '100%' }}>
+      <MinimalApp initialScreen={tw.startScreen} density={tw.density} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Shell />);
+
+// Tweaks bridge
+(() => {
+  const panel = document.getElementById('tweaks');
+  const state = { ...TWEAK_DEFAULTS };
+
+  const syncDom = () => {
+    document.getElementById('tw-screen').value  = state.startScreen;
+    document.getElementById('tw-density').value = state.density;
+    document.querySelectorAll('#tw-accent .swatch').forEach(s => {
+      s.classList.toggle('on', s.dataset.v === state.accent);
+    });
+  };
+
+  const commit = (patch) => {
+    Object.assign(state, patch);
+    syncDom();
+    window.__setTw && window.__setTw({ ...state });
+    window.parent?.postMessage({ type: '__edit_mode_set_keys', edits: patch }, '*');
+  };
+
+  window.addEventListener('message', (e) => {
+    if (!e.data) return;
+    if (e.data.type === '__activate_edit_mode')    panel.classList.add('active');
+    if (e.data.type === '__deactivate_edit_mode')  panel.classList.remove('active');
+  });
+  setTimeout(() => window.parent?.postMessage({ type: '__edit_mode_available' }, '*'), 50);
+
+  document.getElementById('tw-screen').addEventListener('change',  e => commit({ startScreen: e.target.value }));
+  document.getElementById('tw-density').addEventListener('change', e => commit({ density: e.target.value }));
+  document.querySelectorAll('#tw-accent .swatch').forEach(s =>
+    s.addEventListener('click', () => commit({ accent: s.dataset.v })));
+
+  syncDom();
+})();
+</script>
+</body>
+</html>

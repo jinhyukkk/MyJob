@@ -1,0 +1,15 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: oklch(0.985 0.002 265);
+  overflow: hidden;
+}
+body {
+  font-family:
+    'Pretendard Variable', 'IBM Plex Sans', -apple-system, system-ui, sans-serif;
+  color: oklch(0.18 0.01 265);
+}
+* { box-sizing: border-box; }
+button { font-family: inherit; }
+input, textarea { font-family: inherit; }

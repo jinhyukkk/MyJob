@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Source {
+  id         String   @id @default(cuid())
+  name       String
+  adapter    String   // adapter key (e.g. "cj_recruit")
+  url        String   // landing URL for reference
+  active     Boolean  @default(true)
+  config     String   @default("{}") // JSON adapter config (filters, keywords)
+  lastSyncAt DateTime?
+  lastError  String?
+  createdAt  DateTime @default(now())
+  jobs       Job[]
+}
+
+model Job {
+  id             String   @id @default(cuid())
+  sourceId       String
+  source         Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  externalId     String   // unique id at source (e.g. zz_jo_num)
+  title          String
+  company        String
+  team           String?
+  location       String?
+  type           String?  // e.g. 정규직 / 경력 / 인턴
+  level          String?
+  category       String?  // job_cd_nm
+  url            String
+  description    String?  // free-text body if crawled
+  postedAt       DateTime?
+  deadlineAt     DateTime?
+  deadlineLabel  String?  // "2026.05.03" raw
+  ddayLabel      String?  // "D-12" etc.
+  raw            String   // raw JSON snapshot as string
+  firstSeenAt    DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+  closed         Boolean  @default(false)
+
+  saved          Boolean  @default(false)
+  applied        Boolean  @default(false)
+  stage          String?  // Saved | Applied | Interview | Offer | Rejected
+  note           String?
+
+  match          Int      @default(0)
+  matchReasons   String?  // JSON array string
+
+  @@unique([sourceId, externalId])
+  @@index([postedAt])
+  @@index([deadlineAt])
+  @@index([company])
+}
+
+model Profile {
+  id         Int      @id @default(1)
+  name       String   @default("나")
+  role       String   @default("")
+  stack      String   @default("[]") // JSON array
+  interests  String   @default("[]") // JSON array
+  locations  String   @default("[]") // JSON array
+  salaryMin  Int?
+  salaryMax  Int?
+  passive    Boolean  @default(true)
+  updatedAt  DateTime @updatedAt @default(now())
+}

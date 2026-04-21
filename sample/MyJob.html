@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>MyJob — Design Exploration</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.css" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #f0eee9; overflow: hidden; }
+  body { font-family: 'Pretendard Variable', 'IBM Plex Sans', -apple-system, system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+
+  /* Tweaks panel */
+  .tweaks-panel {
+    position: fixed; bottom: 16px; right: 16px; width: 260px; z-index: 1000;
+    background: #1a1a1c; color: #f4f1eb; border-radius: 10px; padding: 14px;
+    font-family: 'IBM Plex Sans', sans-serif; font-size: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    display: none;
+  }
+  .tweaks-panel.active { display: block; }
+  .tweaks-panel h4 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: #a8a69e; font-weight: 700; }
+  .tweaks-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+  .tweaks-row label { color: #d8d5cd; }
+  .tweaks-row select, .tweaks-row input[type="text"] {
+    background: #28282a; color: #f4f1eb; border: 1px solid #333;
+    padding: 4px 8px; border-radius: 5px; font-size: 11px; font-family: inherit;
+  }
+  .swatches { display: flex; gap: 6px; }
+  .swatch { width: 18px; height: 18px; border-radius: 4px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); }
+  .swatch.on { box-shadow: 0 0 0 2px #f4f1eb; }
+</style>
+</head>
+<body data-screen-label="MyJob — Design Exploration">
+<div id="root"></div>
+
+<!-- Tweaks panel (hidden until toggled on) -->
+<div id="tweaks" class="tweaks-panel">
+  <h4>Tweaks</h4>
+  <div class="tweaks-row">
+    <label>Minimal screen</label>
+    <select id="tw-minimal">
+      <option value="feed">Feed</option>
+      <option value="detail">Detail</option>
+      <option value="tracker">Tracker</option>
+      <option value="bookmarks">Saved</option>
+      <option value="profile">Profile</option>
+      <option value="sources">Sources</option>
+    </select>
+  </div>
+  <div class="tweaks-row">
+    <label>Bold screen</label>
+    <select id="tw-bold">
+      <option value="tracker">Pipeline</option>
+      <option value="feed">Discover</option>
+      <option value="bookmarks">Saved</option>
+      <option value="sources">Sources</option>
+      <option value="profile">Profile</option>
+    </select>
+  </div>
+  <div class="tweaks-row">
+    <label>Dashboard screen</label>
+    <select id="tw-dash">
+      <option value="dashboard">Today</option>
+      <option value="feed">Discover</option>
+      <option value="bookmarks">Saved</option>
+      <option value="tracker">Applications</option>
+      <option value="sources">Sources</option>
+      <option value="profile">Profile</option>
+    </select>
+  </div>
+  <div style="border-top:1px solid #2a2a2d; margin: 10px -14px; padding: 10px 14px 0;">
+    <div class="tweaks-row">
+      <label>Minimal accent</label>
+      <div class="swatches" id="tw-min-accent">
+        <div class="swatch" data-v="oklch(0.52 0.13 155)" style="background:oklch(0.52 0.13 155)"></div>
+        <div class="swatch" data-v="oklch(0.55 0.14 245)" style="background:oklch(0.55 0.14 245)"></div>
+        <div class="swatch" data-v="oklch(0.56 0.14 30)"  style="background:oklch(0.56 0.14 30)"></div>
+        <div class="swatch" data-v="oklch(0.52 0.16 295)" style="background:oklch(0.52 0.16 295)"></div>
+      </div>
+    </div>
+    <div class="tweaks-row">
+      <label>Bold accent</label>
+      <div class="swatches" id="tw-bold-accent">
+        <div class="swatch" data-v="#d8ff5c" style="background:#d8ff5c"></div>
+        <div class="swatch" data-v="#ff7a5c" style="background:#ff7a5c"></div>
+        <div class="swatch" data-v="#7aa8ff" style="background:#7aa8ff"></div>
+        <div class="swatch" data-v="#f4f1eb" style="background:#f4f1eb"></div>
+      </div>
+    </div>
+    <div class="tweaks-row">
+      <label>Dashboard accent</label>
+      <div class="swatches" id="tw-dash-accent">
+        <div class="swatch" data-v="oklch(0.56 0.14 30)"  style="background:oklch(0.56 0.14 30)"></div>
+        <div class="swatch" data-v="oklch(0.52 0.13 155)" style="background:oklch(0.52 0.13 155)"></div>
+        <div class="swatch" data-v="oklch(0.55 0.14 245)" style="background:oklch(0.55 0.14 245)"></div>
+        <div class="swatch" data-v="oklch(0.52 0.16 295)" style="background:oklch(0.52 0.16 295)"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="common.jsx"></script>
+<script type="text/babel" src="variant-minimal.jsx"></script>
+<script type="text/babel" src="variant-bold.jsx"></script>
+<script type="text/babel" src="variant-dashboard.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "minimalScreen":  "feed",
+  "boldScreen":     "tracker",
+  "dashScreen":     "dashboard",
+  "minAccent":      "oklch(0.52 0.13 155)",
+  "boldAccent":     "#d8ff5c",
+  "dashAccent":     "oklch(0.56 0.14 30)"
+}/*EDITMODE-END*/;
+window.TWEAK_DEFAULTS = TWEAK_DEFAULTS;
+
+// ── Tweaks bridge ────────────────────────────────────────────────────
+(() => {
+  const panel = document.getElementById('tweaks');
+  const state = { ...TWEAK_DEFAULTS };
+
+  const syncDom = () => {
+    document.getElementById('tw-minimal').value = state.minimalScreen;
+    document.getElementById('tw-bold').value    = state.boldScreen;
+    document.getElementById('tw-dash').value    = state.dashScreen;
+    ['tw-min-accent', 'tw-bold-accent', 'tw-dash-accent'].forEach((id, i) => {
+      const key = ['minAccent', 'boldAccent', 'dashAccent'][i];
+      document.querySelectorAll(`#${id} .swatch`).forEach(s => {
+        s.classList.toggle('on', s.dataset.v === state[key]);
+      });
+    });
+  };
+
+  const rerender = () => {
+    // Rerender artboards with new props — force via rerender of App
+    const appKey = JSON.stringify(state);
+    ReactDOM.createRoot; // no-op
+    // Simplest: rerender top-level app by re-calling render via a shared state setter we'll expose
+    window.__setTw && window.__setTw({ ...state });
+  };
+
+  const commit = (patch) => {
+    Object.assign(state, patch);
+    syncDom();
+    rerender();
+    window.parent?.postMessage({ type: '__edit_mode_set_keys', edits: patch }, '*');
+  };
+
+  window.addEventListener('message', (e) => {
+    if (!e.data) return;
+    if (e.data.type === '__activate_edit_mode')    panel.classList.add('active');
+    if (e.data.type === '__deactivate_edit_mode')  panel.classList.remove('active');
+  });
+  // Hand listener before announcing
+  setTimeout(() => {
+    window.parent?.postMessage({ type: '__edit_mode_available' }, '*');
+  }, 50);
+
+  document.getElementById('tw-minimal').addEventListener('change', e => commit({ minimalScreen: e.target.value }));
+  document.getElementById('tw-bold').addEventListener('change',    e => commit({ boldScreen: e.target.value }));
+  document.getElementById('tw-dash').addEventListener('change',    e => commit({ dashScreen: e.target.value }));
+  document.querySelectorAll('#tw-min-accent .swatch').forEach(s => s.addEventListener('click', () => commit({ minAccent: s.dataset.v })));
+  document.querySelectorAll('#tw-bold-accent .swatch').forEach(s => s.addEventListener('click', () => commit({ boldAccent: s.dataset.v })));
+  document.querySelectorAll('#tw-dash-accent .swatch').forEach(s => s.addEventListener('click', () => commit({ dashAccent: s.dataset.v })));
+
+  syncDom();
+})();
+</script>
+
+<script type="text/babel" data-presets="env,react">
+// Wire a simple state setter into window so the tweaks bridge above can trigger rerenders.
+(function wireApp() {
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  function Shell() {
+    const [tw, setTw] = React.useState(window.TWEAK_DEFAULTS || {
+      minimalScreen:'feed', boldScreen:'tracker', dashScreen:'dashboard',
+      minAccent:'oklch(0.52 0.13 155)', boldAccent:'#d8ff5c', dashAccent:'oklch(0.56 0.14 30)'
+    });
+    React.useEffect(() => { window.__setTw = setTw; }, []);
+    // Apply accent token overrides live
+    React.useEffect(() => {
+      if (window.MJ_TOKENS && tw.minAccent) {
+        MJ_TOKENS.accent = tw.minAccent;
+        const m = String(tw.minAccent).match(/oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)/);
+        if (m) {
+          MJ_TOKENS.accentSoft = `oklch(0.94 0.04 ${m[3]})`;
+          MJ_TOKENS.accentText = `oklch(0.36 0.12 ${m[3]})`;
+        }
+      }
+    }, [tw.minAccent]);
+
+    return (
+      <DesignCanvas>
+        <DCSection id="minimal" title="1 · Minimal Editorial" subtitle="Dense list · Linear / Notion feel · keyboard-first">
+          <DCArtboard id="min-main" label="Main · feed" width={1280} height={780}>
+            <MinimalApp key={'m1'+tw.minimalScreen+tw.minAccent} initialScreen={tw.minimalScreen} />
+          </DCArtboard>
+          <DCArtboard id="min-detail" label="Job detail" width={1280} height={780}>
+            <MinimalApp key={'m2'+tw.minAccent} initialScreen="detail" />
+          </DCArtboard>
+          <DCArtboard id="min-tracker" label="Application tracker" width={1280} height={780}>
+            <MinimalApp key={'m3'+tw.minAccent} initialScreen="tracker" />
+          </DCArtboard>
+          <DCArtboard id="min-sources" label="Crawl sources" width={1280} height={780}>
+            <MinimalApp key={'m4'+tw.minAccent} initialScreen="sources" />
+          </DCArtboard>
+          <DCArtboard id="min-profile" label="Profile & match prefs" width={1280} height={780}>
+            <MinimalApp key={'m5'+tw.minAccent} initialScreen="profile" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="bold" title="2 · Bold Kanban" subtitle="Tracker-first · dark + electric · large display type">
+          <DCArtboard id="bold-tracker" label="Pipeline · home" width={1280} height={820}>
+            <BoldApp key={'b1'+tw.boldScreen} initialScreen={tw.boldScreen} />
+          </DCArtboard>
+          <DCArtboard id="bold-feed" label="Discover feed" width={1280} height={820}>
+            <BoldApp initialScreen="feed" />
+          </DCArtboard>
+          <DCArtboard id="bold-detail" label="Job detail" width={1280} height={820}>
+            <BoldApp initialScreen="detail" />
+          </DCArtboard>
+          <DCArtboard id="bold-sources" label="Crawl sources" width={1280} height={820}>
+            <BoldApp initialScreen="sources" />
+          </DCArtboard>
+          <DCArtboard id="bold-profile" label="Profile" width={1280} height={820}>
+            <BoldApp initialScreen="profile" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="dashboard" title="3 · Card Dashboard" subtitle="Warm · spacious · stat-first landing · mixed density">
+          <DCArtboard id="dash-home" label="Today · dashboard" width={1320} height={820}>
+            <DashApp key={'d1'+tw.dashScreen} initialScreen={tw.dashScreen} />
+          </DCArtboard>
+          <DCArtboard id="dash-feed" label="Discover grid" width={1320} height={820}>
+            <DashApp initialScreen="feed" />
+          </DCArtboard>
+          <DCArtboard id="dash-detail" label="Job detail" width={1320} height={820}>
+            <DashApp initialScreen="detail" />
+          </DCArtboard>
+          <DCArtboard id="dash-tracker" label="Applications" width={1320} height={820}>
+            <DashApp initialScreen="tracker" />
+          </DCArtboard>
+          <DCArtboard id="dash-sources" label="Crawl sources" width={1320} height={820}>
+            <DashApp initialScreen="sources" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCPostIt top={140} left={40} rotate={-3} width={210}>
+          3 directions · same data.<br/>
+          Click any label to focus, ← → to navigate.
+        </DCPostIt>
+      </DesignCanvas>
+    );
+  }
+  window.TWEAK_DEFAULTS = TWEAK_DEFAULTS;
+  root.render(<Shell />);
+})();
+</script>
+
+</body>
+</html>
